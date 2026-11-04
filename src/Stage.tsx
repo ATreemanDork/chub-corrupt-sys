@@ -1,95 +1,41 @@
 import {ReactElement} from "react";
 import {StageBase, StageResponse, InitialData, Message} from "@chub-ai/stages-ts";
 import {LoadResponse} from "@chub-ai/stages-ts/dist/types/load";
+import {CorruptionStats, TargetProfile, parseMessage} from "./parser";
+
+type InitStateType = unknown;
+type ChatStateType = unknown;
+type ConfigType = unknown;
 
 /***
- The type that this stage persists message-level state in.
- This is primarily for readability, and not enforced.
-
- @description This type is saved in the database after each message,
-  which makes it ideal for storing things like positions and statuses,
-  but not for things like history, which is best managed ephemerally
-  in the internal state of the Stage class itself.
+ The type this stage persists per message.
+ It is saved in the database after each message (see StageBase),
+ which is what the panel displays and what beforePrompt() re-injects
+ so the model keeps the stat block consistent across long chats.
  ***/
-type MessageStateType = any;
+export type MessageStateType = {
+    target: TargetProfile | null;
+    stats: CorruptionStats | null;
+    fetishes: string | null;
+    points: number;
+};
 
-/***
- The type of the stage-specific configuration of this stage.
+const EMPTY_STATE: MessageStateType = {target: null, stats: null, fetishes: null, points: 0};
 
- @description This is for things you want people to be able to configure,
-  like background color.
- ***/
-type ConfigType = any;
-
-/***
- The type that this stage persists chat initialization state in.
- If there is any 'constant once initialized' static state unique to a chat,
- like procedurally generated terrain that is only created ONCE and ONLY ONCE per chat,
- it belongs here.
- ***/
-type InitStateType = any;
-
-/***
- The type that this stage persists dynamic chat-level state in.
- This is for any state information unique to a chat,
-    that applies to ALL branches and paths such as clearing fog-of-war.
- It is usually unlikely you will need this, and if it is used for message-level
-    data like player health then it will enter an inconsistent state whenever
-    they change branches or jump nodes. Use MessageStateType for that.
- ***/
-type ChatStateType = any;
-
-/***
- A simple example class that implements the interfaces necessary for a Stage.
- If you want to rename it, be sure to modify App.js as well.
- @link https://github.com/CharHubAI/chub-stages-ts/blob/main/src/types/stage.ts
- ***/
 export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateType, ConfigType> {
 
-    /***
-     A very simple example internal state. Can be anything.
-     This is ephemeral in the sense that it isn't persisted to a database,
-     but exists as long as the instance does, i.e., the chat page is open.
-     ***/
-    myInternalState: {[key: string]: any};
+    state: MessageStateType = {...EMPTY_STATE};
 
     constructor(data: InitialData<InitStateType, ChatStateType, MessageStateType, ConfigType>) {
-        /***
-         This is the first thing called in the stage,
-         to create an instance of it.
-         The definition of InitialData is at @link https://github.com/CharHubAI/chub-stages-ts/blob/main/src/types/initial.ts
-         Character at @link https://github.com/CharHubAI/chub-stages-ts/blob/main/src/types/character.ts
-         User at @link https://github.com/CharHubAI/chub-stages-ts/blob/main/src/types/user.ts
-         ***/
         super(data);
-        const {
-            characters,         // @type:  { [key: string]: Character }
-            users,                  // @type:  { [key: string]: User}
-            config,                                 //  @type:  ConfigType
-            messageState,                           //  @type:  MessageStateType
-            environment,                     // @type: Environment (which is a string)
-            initState,                             // @type: null | InitStateType
-            chatState                              // @type: null | ChatStateType
-        } = data;
-        this.myInternalState = messageState != null ? messageState : {'someKey': 'someValue'};
-        this.myInternalState['numUsers'] = Object.keys(users).length;
-        this.myInternalState['numChars'] = Object.keys(characters).length;
+        if (data.messageState != null) {
+            this.state = {...EMPTY_STATE, ...data.messageState};
+        }
     }
 
     async load(): Promise<Partial<LoadResponse<InitStateType, ChatStateType, MessageStateType>>> {
-        /***
-         This is called immediately after the constructor, in case there is some asynchronous code you need to
-         run on instantiation.
-         ***/
         return {
-            /*** @type boolean @default null
-             @description The 'success' boolean returned should be false IFF (if and only if), some condition is met that means
-              the stage shouldn't be run at all and the iFrame can be closed/removed.
-              For example, if a stage displays expressions and no characters have an expression pack,
-              there is no reason to run the stage, so it would return false here. ***/
             success: true,
-            /*** @type null | string @description an error message to show
-             briefly at the top of the screen, if any. ***/
             error: null,
             initState: null,
             chatState: null,
@@ -97,109 +43,115 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
     }
 
     async setState(state: MessageStateType): Promise<void> {
-        /***
-         This can be called at any time, typically after a jump to a different place in the chat tree
-         or a swipe. Note how neither InitState nor ChatState are given here. They are not for
-         state that is affected by swiping.
-         ***/
         if (state != null) {
-            this.myInternalState = {...this.myInternalState, ...state};
+            this.state = {...this.state, ...state};
         }
     }
 
-    async beforePrompt(userMessage: Message): Promise<Partial<StageResponse<ChatStateType, MessageStateType>>> {
-        /***
-         This is called after someone presses 'send', but before anything is sent to the LLM.
-         ***/
-        const {
-            content,            /*** @type: string
-             @description Just the last message about to be sent. ***/
-            anonymizedId,       /*** @type: string
-             @description An anonymized ID that is unique to this individual
-              in this chat, but NOT their Chub ID. ***/
-            isBot             /*** @type: boolean
-             @description Whether this is itself from another bot, ex. in a group chat. ***/
-        } = userMessage;
+    /***
+     After the user presses send, before the LLM call:
+     re-inject the panel's current state as prompt directions.
+     ***/
+    async beforePrompt(): Promise<Partial<StageResponse<ChatStateType, MessageStateType>>> {
+        let stageDirections: string | null = null;
+        const {target, stats, fetishes, points} = this.state;
+        if (target != null || stats != null || points > 0) {
+            const parts: string[] = [];
+            if (target != null) {
+                let t = `Current target: ${target.name}`;
+                if (target.age != null) t += `, age ${target.age}`;
+                if (target.occupation != null) t += `, occupation ${target.occupation}`;
+                parts.push(t);
+            }
+            if (stats != null) parts.push(`Current stats: LUST:${stats.lust}, CORRUPTION:${stats.corruption}, DOMINANCE:${stats.dominance}`);
+            if (points > 0) parts.push(`Ability points: ${points}`);
+            if (fetishes != null) parts.push(`Fetishes: ${fetishes}`);
+            stageDirections = `[Corruption System panel: ${parts.join('; ')}. Keep the stat block at the end of your message consistent with these values.]`;
+        }
         return {
-            /*** @type null | string @description A string to add to the
-             end of the final prompt sent to the LLM,
-             but that isn't persisted. ***/
-            stageDirections: null,
-            /*** @type MessageStateType | null @description the new state after the userMessage. ***/
-            messageState: {'someKey': this.myInternalState['someKey']},
-            /*** @type null | string @description If not null, the user's message itself is replaced
-             with this value, both in what's sent to the LLM and in the database. ***/
+            stageDirections,
+            messageState: this.state,
             modifiedMessage: null,
-            /*** @type null | string @description A system message to append to the end of this message.
-             This is unique in that it shows up in the chat log and is sent to the LLM in subsequent messages,
-             but it's shown as coming from a system user and not any member of the chat. If you have things like
-             computed stat blocks that you want to show in the log, but don't want the LLM to start trying to
-             mimic/output them, they belong here. ***/
             systemMessage: null,
-            /*** @type null | string @description an error message to show
-             briefly at the top of the screen, if any. ***/
             error: null,
             chatState: null,
         };
     }
 
+    /***
+     After the bot's response: parse the stat block / target profile
+     / fetishes / ability points out of the message text.
+     ***/
     async afterResponse(botMessage: Message): Promise<Partial<StageResponse<ChatStateType, MessageStateType>>> {
-        /***
-         This is called immediately after a response from the LLM.
-         ***/
-        const {
-            content,            /*** @type: string
-             @description The LLM's response. ***/
-            anonymizedId,       /*** @type: string
-             @description An anonymized ID that is unique to this individual
-              in this chat, but NOT their Chub ID. ***/
-            isBot             /*** @type: boolean
-             @description Whether this is from a bot, conceivably always true. ***/
-        } = botMessage;
+        const parsed = parseMessage(botMessage.content);
+        if (parsed.target != null) this.state.target = {...this.state.target, ...parsed.target};
+        if (parsed.stats != null) this.state.stats = parsed.stats;
+        if (parsed.fetishes != null) this.state.fetishes = parsed.fetishes;
+        if (parsed.points != null) this.state.points = parsed.points;
         return {
-            /*** @type null | string @description A string to add to the
-             end of the final prompt sent to the LLM,
-             but that isn't persisted. ***/
             stageDirections: null,
-            /*** @type MessageStateType | null @description the new state after the botMessage. ***/
-            messageState: {'someKey': this.myInternalState['someKey']},
-            /*** @type null | string @description If not null, the bot's response itself is replaced
-             with this value, both in what's sent to the LLM subsequently and in the database. ***/
+            messageState: this.state,
             modifiedMessage: null,
-            /*** @type null | string @description an error message to show
-             briefly at the top of the screen, if any. ***/
-            error: null,
             systemMessage: null,
-            chatState: null
+            error: null,
+            chatState: null,
         };
     }
 
-
+    /***
+     Panel: current target, stat bars, points and fetishes.
+     No "work" happens here; all state comes from the lifecycle hooks.
+     ***/
     render(): ReactElement {
-        /***
-         There should be no "work" done here. Just returning the React element to display.
-         If you're unfamiliar with React and prefer video, I've heard good things about
-         @link https://scrimba.com/learn/learnreact but haven't personally watched/used it.
-
-         For creating 3D and game components, react-three-fiber
-           @link https://docs.pmnd.rs/react-three-fiber/getting-started/introduction
-           and the associated ecosystem of libraries are quite good and intuitive.
-
-         Cuberun is a good example of a game built with them.
-           @link https://github.com/akarlsten/cuberun (Source)
-           @link https://cuberun.adamkarlsten.com/ (Demo)
-         ***/
-        return <div style={{
+        const {target, stats, fetishes, points} = this.state;
+        return <div className="cs-panel" style={{
             width: '100vw',
             height: '100vh',
             display: 'grid',
-            alignItems: 'stretch'
+            alignItems: 'stretch',
+            gap: 8,
+            padding: 8,
+            fontSize: 13,
+            fontFamily: 'system-ui, sans-serif',
+            color: '#eee',
         }}>
-            <div>Hello World! I'm an empty stage! With {this.myInternalState['someKey']}!</div>
-            <div>There is/are/were {this.myInternalState['numChars']} character(s)
-                and {this.myInternalState['numUsers']} human(s) here.
-            </div>
+            <div style={{fontWeight: 700}}>Corruption Sim</div>
+            {target == null && <div style={{opacity: 0.6}}>No target yet — ask the system to find one.</div>}
+            {target != null && (
+                <div>
+                    <div style={{fontWeight: 600}}>
+                        {target.name}
+                        {target.age != null && ` (${target.age})`}
+                        {target.occupation != null && ` — ${target.occupation}`}
+                    </div>
+                    {target.appearance != null && <div style={{opacity: 0.75, whiteSpace: 'pre-wrap'}}>{target.appearance}</div>}
+                </div>
+            )}
+            {stats != null && (
+                <>
+                    <Bar label="LUST" value={stats.lust} min={0} max={100}/>
+                    <Bar label="CORRUPTION" value={stats.corruption} min={0} max={100}/>
+                    <Bar label="DOMINANCE" value={stats.dominance} min={-100} max={100}/>
+                </>
+            )}
+            <div>Ability points: {points}</div>
+            {fetishes != null && <div style={{opacity: 0.75}}>Fetishes: {fetishes}</div>}
         </div>;
     }
 
+}
+
+// eslint-disable-next-line react-refresh/only-export-components -- stage module, not a fast-refresh component
+function Bar({label, value, min, max}: {label: string; value: number; min: number; max: number}) {
+    const pct = Math.max(0, Math.min(100, ((value - min) / (max - min)) * 100));
+    return (
+        <div>
+            <div>{label}: {value}</div>
+            {/* Colors come from index.scss (.cs-track/.cs-fill): the stage's global
+                `* { background-color: transparent !important }` rule kills inline ones. */}
+            <div className="cs-track" style={{height: 6, borderRadius: 3, overflow: 'hidden'}}>
+                <div className="cs-fill" style={{width: `${pct}%`, height: '100%'}}/>
+            </div>
+        </div>
+    );
 }

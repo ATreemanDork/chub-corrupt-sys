@@ -16,3 +16,17 @@ html, body, #root {
   margin: 0;
   padding: 0;
 }
+
+// The stage's global `*` rule above forces overflow hidden and transparent
+// backgrounds on everything; the panel's own elements override it.
+.cs-panel {
+  overflow-y: auto !important;
+}
+
+.cs-track {
+  background-color: rgba(255, 255, 255, 0.15) !important;
+}
+
+.cs-fill {
+  background-color: #c2579a !important;
+}

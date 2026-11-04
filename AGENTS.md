@@ -1,11 +1,12 @@
 # AGENTS.md
 
 ## What this repo is
-- Chub.ai stage (React 18 + TypeScript + Vite 5, yarn, node 21.7.1). Currently the unmodified Hello World template from `CharHubAI/stage-template`.
-- Purpose: companion stage for the **Corruption System** card (`Corruption System.json`, repo root). Scope: parse the card's stat blocks out of bot messages, show them in a UI panel, and re-inject the current stat block into the prompt (`stageDirections` / `systemMessage`) so the model stays consistent.
+- Chub.ai stage (React 18 + TypeScript + Vite 5, yarn, node 21.7.1), forked from `CharHubAI/stage-template` (origin points at the fork: `gitea.atree.men/ATrentham/chub-corrupt-sys`).
+- Companion stage for the **Corruption System** card (`Corruption System.json`, repo root): parses the card's stat blocks out of bot messages, shows them in an ADJACENT panel, and re-injects the current state via `stageDirections` so the model stays consistent.
+- **Do not strip stat lines from messages** (no `modifiedMessage` in v1) — the message text is the source of truth; the panel is derived.
 
 ## Commands
-- `yarn install` — fresh clones have no `node_modules`.
+- `yarn install` — fresh clones have no `node_modules`. `package.json` `engines.node` is `>=21.7.1`; if a toolchain pins a different version, `yarn install --ignore-engines` works.
 - `yarn dev` — local dev. There is no real chat UI locally; `TestRunner.tsx` runs instead (below).
 - `yarn lint` — eslint with `--max-warnings 0`; a warning fails the build.
 - `yarn build` — `tsc && vite build` (the deploy build). `yarn build --mode lib` is the npm/library build (entry `src/index.ts`, umd/es/cjs/iife, react external).
@@ -19,15 +20,18 @@
 - Verify with `console.assert`; the rendered panel shows in the browser, logs in the console.
 
 ## Where implementation lives
-- `src/Stage.tsx` is the only real code. `Stage extends StageBase<...>` from `@chub-ai/stages-ts`; `src/index.ts` re-exports it as the lib entry.
-- Hooks:
+- `src/Stage.tsx` — `Stage extends StageBase<...>` from `@chub-ai/stages-ts` (v0.3.7); `src/index.ts` re-exports it as the lib entry.
+- `src/parser.ts` — pure (no imports) tolerant parser for the card's model output; the only place stat/profile text is parsed. Keep parsing logic here, not in Stage.tsx.
+- `src/TestRunner.tsx` + `src/assets/test-init.json` — the local harness (see above). test-init.json is generated from the card; regenerate it if the card changes.
+- Lifecycle hooks and where to put things:
   - `load()` — async init; return `success: false` to hide the stage entirely.
-  - `beforePrompt()` — runs after the user presses send, before the LLM call. Returns `stageDirections` (appended to the prompt, not persisted), `modifiedMessage` (replaces the user message in DB + later prompts), `systemMessage` (shown in the chat log as a system entry and re-sent to the LLM in later messages — right place for computed stat blocks), and `messageState`.
-  - `afterResponse()` — runs on the bot message; **stat parsing goes here**.
-  - `setState()` — called on branch jump/swipe; rehydrate persisted `messageState` here.
+  - `beforePrompt()` — before the LLM call. `stageDirections` (appended to prompt, not persisted) carries the current stat state for model consistency. `modifiedMessage` replaces the user message in DB + later prompts. `systemMessage` shows in the chat log as a system entry and is re-sent to the LLM.
+  - `afterResponse()` — after the bot message; **stat parsing goes here** (calls `parseMessage`).
+  - `setState()` — branch jump/swipe; merge persisted `messageState` back in.
   - `render()` — pure React display, no work in it.
-- State semantics (from the template comments in Stage.tsx): `messageState` is persisted per message → use it for stats/points (branch-safe); `chatState` is branch-agnostic (rarely needed); `initState` is once-per-chat; plain class fields are in-memory only and lost on reload.
-- API docs: https://docs.chub.ai/docs/stages
+- State semantics: `messageState` is persisted per message → use it for stats/points (branch-safe); `chatState` is branch-agnostic (rarely needed); `initState` is once-per-chat; plain class fields are in-memory only and lost on reload.
+- **SCSS gotcha:** `src/index.scss` has a global `* { background-color: transparent !important; overflow: hidden !important; }` (stage must stay transparent over chat). Any panel background/scroll must be a named scss class with `!important` overrides (see `.cs-panel`, `.cs-track`, `.cs-fill`) — inline styles lose to it.
+- API docs: https://docs.chub.ai/docs/stages; a fully-featured reference stage is `CharHubAI/stage-integration-test` (messenger/generator/storage APIs, MCP tools — not used in this v1).
 
 ## Card contract (what the parser must handle)
 - The bot (`{{char}}` is a phone-app "system" character) ends every message with `**LUST:{##}, CORRUPTION:{##}, DOMINANCE:{##}**`. DOMINANCE ranges **-100..100** — the parser must handle a minus sign.
