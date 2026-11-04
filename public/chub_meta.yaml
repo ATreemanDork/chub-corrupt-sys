@@ -34,3 +34,6 @@ tags:
 # This is here for future cases where ex. you need user secrets,
 #    but currently does nothing.
 # permissions:
+
+github_path: 'https://github.com/ATreemanDork/chub-corrupt-sys'
+
