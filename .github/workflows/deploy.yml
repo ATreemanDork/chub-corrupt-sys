@@ -16,9 +16,9 @@ jobs:
   build-and-upload:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: Set up Node
-        uses: actions/setup-node@v2
+        uses: actions/setup-node@v4
         with:
           node-version: '21.7.1'
 
@@ -65,10 +65,12 @@ jobs:
                   echo "Extension ID not present in public/chub_meta.yaml extension_id field either. Creating new project."
                   sudo apt-get install jq
                   STAGE_ID=""
-                  curl -H "CH-API-KEY: ${{ secrets.CHUB_AUTH_TOKEN }}" -H "Content-Type: application/json" --request POST --data '{"name":"${{ github.event.repository.name }}"}'  https://api.chub.ai/extensions  -o creation.json
+                  curl -fS -H "CH-API-KEY: ${{ secrets.CHUB_AUTH_TOKEN }}" -H "Content-Type: application/json" --request POST --data '{"name":"${{ github.event.repository.name }}"}'  https://api.chub.ai/extensions  -o creation.json \
+                    || { echo "Chub API request failed (403 geo-block from US runners is a known cause) — response body:"; cat creation.json 2>/dev/null; echo; exit 1; }
                   STAGE_ID=$(jq -r '.id_v2' creation.json)
                   if [ "${STAGE_ID}" == "" ] || [ "${STAGE_ID}" == "null" ]; then
-                    echo "Extension ID creation failed; is your CHUB_AUTH_TOKEN secret set for this project?"
+                    echo "Extension ID creation failed; is your CHUB_AUTH_TOKEN secret set for this project? Response:"
+                    cat creation.json; echo
                     exit 1
                   fi
                   echo -e "\nextension_id: '${STAGE_ID}'\n" >> public/chub_meta.yaml
@@ -116,8 +118,9 @@ jobs:
         if: ${{ !contains(github.repository, 'template') }}
         env:
           CHUB_AUTH_TOKEN: ${{ secrets.CHUB_AUTH_TOKEN }}
-        run: |    
-          curl -H "CH-API-KEY: ${{ secrets.CHUB_AUTH_TOKEN }}" -F "file=@build.zip" https://api.chub.ai/extension/${{ env.STAGE_ID }}/upload
+        run: |
+          curl -fS -H "CH-API-KEY: ${{ secrets.CHUB_AUTH_TOKEN }}" -F "file=@build.zip" https://api.chub.ai/extension/${{ env.STAGE_ID }}/upload \
+            || { echo "Upload failed (403 geo-block from US runners is a known cause). Deploy from a non-geo-blocked connection via ./deploy.sh instead."; exit 1; }
 
       - name: Setup .npmrc
         env:

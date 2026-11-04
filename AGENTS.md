@@ -54,8 +54,9 @@
 - Manual deploy: run `./deploy.sh` (needs `tokens.ini` at repo root with `CHUB_AUTH_TOKEN`). It resolves/creates the extension id, writes `extension_id` to `chub_meta.yaml` + `project_uuid` to the character yaml, commits those, builds, zips `dist`, uploads. Must run from a connection not geo-blocked by Chub (the dev box's US datacenter egress is rejected).
   - `<STAGE_ID>`: read `extension_id:` from `public/chub_meta.yaml` once it exists; on first deploy, create one via `curl -H "CH-API-KEY: $CHUB_AUTH_TOKEN" -X POST -d '{"name":"<repo name>"}' https://api.chub.ai/extensions` and take `id_v2`.
 - CI also does: push to `main`/`master` → build + upload; tag `v*` → `yarn build --mode lib` + npm publish (needs `NPM_TOKEN`). `package.json` is still named `@chub-ai/stage-template` — rename before publishing your own.
+  - **CI deploy is geo-blocked**: GitHub's ubuntu runners are US-based and `api.chub.ai` 403s US datacenter egress ("This service is not available in your country") — same as the dev box (confirmed in run 41893641437, 2026-11-04). The workflow now fails loudly with the response body. Treat CI as build validation only; actually deploy via `./deploy.sh` from a non-geo-blocked connection. A self-hosted runner (on a machine that isn't blocked) is the fix if CI deploy is ever wanted.
 
 ## Misc
-- The card is **untracked in git** (`?? "Corruption System.json"`) — add it if you want it versioned alongside the stage.
+- The card is intentionally **not tracked in git** — it was committed then removed (`44a406e Delete Corruption System.json`, explicit adult content in a public GitHub mirror). It lives in the worktree as `?? "Corruption System.json"`; keep it out of commits.
 - The card is an explicit adult-themed simulation — set `visibility`/`tags` in `chub_meta.yaml` accordingly when filling it in.
 - The card's `extensions.importMetadata` reports a v3 export but the `spec` is `chara_card_v2` 2.0 — Chub accepts it as v2; don't "upgrade" it on a hunch.
