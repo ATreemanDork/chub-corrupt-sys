@@ -28,4 +28,5 @@ types/
 dist/
 creation.json
 *.trash
+tokens.ini
 *.tgz
