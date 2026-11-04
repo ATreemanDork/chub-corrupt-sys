@@ -57,6 +57,6 @@
   - **CI deploy is geo-blocked**: GitHub's ubuntu runners are US-based and `api.chub.ai` 403s US datacenter egress ("This service is not available in your country") — same as the dev box (confirmed in run 41893641437, 2026-11-04). The workflow now fails loudly with the response body. Treat CI as build validation only; actually deploy via `./deploy.sh` from a non-geo-blocked connection. A self-hosted runner (on a machine that isn't blocked) is the fix if CI deploy is ever wanted.
 
 ## Misc
-- The card is intentionally **not tracked in git** — it was committed then removed (`44a406e Delete Corruption System.json`, explicit adult content in a public GitHub mirror). It lives in the worktree as `?? "Corruption System.json"`; keep it out of commits.
+- The card is intentionally **not tracked in git** (explicit adult content, public GitHub mirror; removed in `44a406e`). The local copy is gitignored; if it's missing, restore with `git show '44a406e^:Corruption System.json' > "Corruption System.json"`.
 - The card is an explicit adult-themed simulation — set `visibility`/`tags` in `chub_meta.yaml` accordingly when filling it in.
 - The card's `extensions.importMetadata` reports a v3 export but the `spec` is `chara_card_v2` 2.0 — Chub accepts it as v2; don't "upgrade" it on a hunch.
