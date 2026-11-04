@@ -30,6 +30,15 @@ if ! grep -q '^project_uuid:' "$CHAR"; then
   echo "Added project_uuid: $U"
 fi
 
+# 2b. Persist the new ids so the next deploy reuses them (mirrors CI).
+if [ -n "$(git status --porcelain public/chub_meta.yaml "$CHAR")" ]; then
+  git config --local user.email >/dev/null 2>&1 || git config --local user.email "deploy@chub.local"
+  git config --local user.name >/dev/null 2>&1 || git config --local user.name "chub-deploy"
+  git add public/chub_meta.yaml "$CHAR"
+  git commit -m "Add extension_id and project_uuid"
+  git push origin main || echo "WARN: push failed — commit the yaml changes yourself"
+fi
+
 # 3. Build.
 yarn install --ignore-engines
 yarn build

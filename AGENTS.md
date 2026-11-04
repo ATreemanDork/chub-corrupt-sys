@@ -50,7 +50,7 @@
 - Token placement:
   - **Chub API token** → repo secret `CHUB_AUTH_TOKEN` (Gitea repo settings → secrets, if Gitea Actions runs the workflow). For a manual deploy instead: export it as a shell env var `CHUB_AUTH_TOKEN`.
   - **Gitea PAT** → credential store / push URL for git pushes only. Never commit it.
-- Manual deploy steps (mirrors `.github/workflows/deploy.yml`): `yarn install && yarn build`, then `cd dist && zip -r ../build.zip * && cd ..`, then `curl -H "CH-API-KEY: $CHUB_AUTH_TOKEN" -F "file=@build.zip" https://api.chub.ai/extension/<STAGE_ID>/upload`.
+- Manual deploy: run `./deploy.sh` (needs `tokens.ini` at repo root with `CHUB_AUTH_TOKEN`). It resolves/creates the extension id, writes `extension_id` to `chub_meta.yaml` + `project_uuid` to the character yaml, commits those, builds, zips `dist`, uploads. Must run from a connection not geo-blocked by Chub (the dev box's US datacenter egress is rejected).
   - `<STAGE_ID>`: read `extension_id:` from `public/chub_meta.yaml` once it exists; on first deploy, create one via `curl -H "CH-API-KEY: $CHUB_AUTH_TOKEN" -X POST -d '{"name":"<repo name>"}' https://api.chub.ai/extensions` and take `id_v2`.
 - CI also does: push to `main`/`master` → build + upload; tag `v*` → `yarn build --mode lib` + npm publish (needs `NPM_TOKEN`). `package.json` is still named `@chub-ai/stage-template` — rename before publishing your own.
 
